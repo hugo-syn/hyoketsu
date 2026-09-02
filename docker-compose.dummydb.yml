@@ -1,6 +1,6 @@
 services:
   clickhouse:
-    image: clickhouse/clickhouse-server:latest
+    image: docker.io/clickhouse/clickhouse-server:latest
     ports:
       - "8123:8123"
       - "9000:9000"
@@ -24,7 +24,7 @@ services:
 
   # Serves the dummy DB via Nginx
   dummydb:
-    image: nginx:alpine
+    image: docker.io/library/nginx:alpine
     volumes:
       - ./testdata/hyoketsu.db:/usr/share/nginx/html/hyoketsu.db:ro
       - ./testdata/nginx-autoindex.conf:/etc/nginx/conf.d/default.conf:ro
