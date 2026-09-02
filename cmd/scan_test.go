@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"encoding/binary"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -108,5 +109,82 @@ func TestRemoteScanMarksDuplicates(t *testing.T) {
 	}
 	if dupCount != 1 {
 		t.Errorf("dupCount = %d, want 1 (one of the two identical files should be marked duplicate)", dupCount)
+	}
+}
+
+// minimalPE builds the smallest PE32 header pe.IsNETAssembly will parse. When
+// hasCLR is true the CLR Runtime Header data directory entry is non-zero, which
+// is exactly what marks a PE as a .NET assembly.
+func minimalPE(hasCLR bool) []byte {
+	const peOffset = 0x80
+	buf := make([]byte, 512)
+
+	buf[0], buf[1] = 'M', 'Z'
+	binary.LittleEndian.PutUint32(buf[0x3C:], peOffset)
+	copy(buf[peOffset:], []byte{'P', 'E', 0, 0})
+
+	optHeaderOffset := peOffset + 4 + 20
+	binary.LittleEndian.PutUint16(buf[optHeaderOffset:], 0x10b) // PE32
+
+	clrEntryOffset := optHeaderOffset + 96 + 14*8
+	if hasCLR {
+		binary.LittleEndian.PutUint32(buf[clrEntryOffset:], 0x2008) // RVA
+		binary.LittleEndian.PutUint32(buf[clrEntryOffset+4:], 0x48) // size
+	}
+	return buf
+}
+
+// TestRemoteScanDetectsDotNet proves remoteScan wires up pe.IsNETAssembly the
+// way scanner.Scan does: without it every remote result had IsDotNet=false and
+// --dotnet-only silently matched nothing.
+func TestRemoteScanDetectsDotNet(t *testing.T) {
+	dir := t.TempDir()
+	files := map[string][]byte{
+		"dotnet.dll":  minimalPE(true),
+		"native.dll":  minimalPE(false),
+		"garbage.dll": []byte("not a PE file at all"),
+	}
+	for name, content := range files {
+		if err := os.WriteFile(filepath.Join(dir, name), content, 0644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req remoteLookupRequest
+		json.NewDecoder(r.Body).Decode(&req)
+		resp := mockLookupResponse{}
+		for _, f := range req.Files {
+			resp.Results = append(resp.Results, mockLookupResult{Filename: f.Filename, Status: "Unknown"})
+		}
+		json.NewEncoder(w).Encode(resp)
+	}))
+	defer ts.Close()
+
+	origRemoteURL := remoteURL
+	remoteURL = ts.URL
+	defer func() { remoteURL = origRemoteURL }()
+
+	results, err := remoteScan(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(results) != len(files) {
+		t.Fatalf("got %d results, want %d", len(results), len(files))
+	}
+
+	got := make(map[string]bool, len(results))
+	for _, r := range results {
+		got[r.Filename] = r.IsDotNet
+	}
+	want := map[string]bool{
+		"dotnet.dll":  true,
+		"native.dll":  false,
+		"garbage.dll": false, // pe.IsNETAssembly errors are tolerated, not fatal
+	}
+	for name, wantDotNet := range want {
+		if got[name] != wantDotNet {
+			t.Errorf("%s: IsDotNet = %v, want %v", name, got[name], wantDotNet)
+		}
 	}
 }

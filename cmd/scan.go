@@ -11,6 +11,7 @@ import (
 	"text/tabwriter"
 
 	"hyoketsu/db"
+	"hyoketsu/pe"
 	"hyoketsu/scanner"
 
 	"github.com/spf13/cobra"
@@ -114,6 +115,17 @@ func remoteScan(target string) ([]scanner.Result, error) {
 	files, err := scanner.CollectFiles(target)
 	if err != nil {
 		return nil, err
+	}
+
+	// Check .NET status for DLLs, mirroring scanner.Scan, so that
+	// --dotnet-only works over --remote too.
+	for i := range files {
+		if files[i].Type == "dll" {
+			isDotNet, err := pe.IsNETAssembly(files[i].Path)
+			if err == nil {
+				files[i].IsDotNet = isDotNet
+			}
+		}
 	}
 
 	req := make([]remoteLookupFile, len(files))
