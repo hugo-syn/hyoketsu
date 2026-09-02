@@ -8,6 +8,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"time"
 )
 
 type LookupRequestBody struct {
@@ -28,6 +29,9 @@ func main() {
 	chDSN := flag.String("clickhouse", "clickhouse://localhost:9000/default", "ClickHouse DSN")
 	importSQLite := flag.String("import-sqlite", "", "Import data from SQLite DB path, then exit")
 	importNuGet := flag.String("import-nuget", "", "Import NuGet JSONL data from directory (containing crawl/ and hashes/), then exit")
+	autoUpdate := flag.Bool("auto-update", false, "periodically download the latest prebuilt db and re-import it into clickhouse")
+	autoUpdateInterval := flag.Duration("auto-update-interval", 30*24*time.Hour, "interval between automatic db re-imports (used with -auto-update)")
+	dbCache := flag.String("db-cache", "/data/hyoketsu.db", "local path to cache the downloaded db before importing (used with -auto-update)")
 	flag.Parse()
 
 	store, err := NewCHStore(*chDSN)
@@ -55,6 +59,10 @@ func main() {
 			log.Fatalf("nuget import failed: %v", err)
 		}
 		os.Exit(0)
+	}
+
+	if *autoUpdate {
+		go runAutoUpdate(ctx, store, *dbCache, *autoUpdateInterval)
 	}
 
 	http.HandleFunc("POST /lookup", func(w http.ResponseWriter, r *http.Request) {

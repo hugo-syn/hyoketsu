@@ -63,6 +63,15 @@ func (s *CHStore) CreateSchema(ctx context.Context) error {
 	return nil
 }
 
+func (s *CHStore) TruncateTables(ctx context.Context) error {
+	for _, table := range []string{"known_dlls", "known_jars"} {
+		if _, err := s.db.ExecContext(ctx, fmt.Sprintf(`TRUNCATE TABLE %s`, table)); err != nil {
+			return fmt.Errorf("truncate %s: %w", table, err)
+		}
+	}
+	return nil
+}
+
 func chTableForType(fileType string) string {
 	if fileType == "jar" {
 		return "known_jars"
