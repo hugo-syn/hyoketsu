@@ -12,6 +12,29 @@ services:
       nofile:
         soft: 262144
         hard: 262144
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:8123/ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  server:
+    build:
+      context: ./server
+    depends_on:
+      clickhouse:
+        condition: service_healthy
+    ports:
+      - "8080:8080"
+    command:
+      - "-clickhouse=clickhouse://clickhouse:9000/default"
+      - "-auto-update"
+      - "-auto-update-interval=720h"
+      - "-db-cache=/data/hyoketsu.db"
+    volumes:
+      - server_data:/data
+    restart: unless-stopped
 
 volumes:
   clickhouse_data:
+  server_data:
