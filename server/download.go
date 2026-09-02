@@ -1,6 +1,7 @@
 package main
 
 import (
+	"database/sql"
 	"fmt"
 	"io"
 	"net/http"
@@ -12,11 +13,28 @@ import (
 
 var (
 	hyoketsuIndexURL = "https://wordlists-cdn.assetnote.io/hyoketsu/"
-	hyoketsuDBURL     = "https://wordlists-cdn.assetnote.io/hyoketsu/hyoketsu.db"
+	hyoketsuDBURL    = "https://wordlists-cdn.assetnote.io/hyoketsu/hyoketsu.db"
 )
 
+// The index page is a small directory listing; the db itself is multi-GB, so
+// they get very different timeouts. Both matter because auto-update runs
+// unattended in a background goroutine with no watchdog.
+var (
+	indexHTTPClient    = &http.Client{Timeout: 30 * time.Second}
+	downloadHTTPClient = &http.Client{Timeout: 30 * time.Minute}
+)
+
+func init() {
+	if v := os.Getenv("HYOKETSU_INDEX_URL"); v != "" {
+		hyoketsuIndexURL = v
+	}
+	if v := os.Getenv("HYOKETSU_DB_URL"); v != "" {
+		hyoketsuDBURL = v
+	}
+}
+
 func fetchRemoteDBDate() (string, error) {
-	resp, err := http.Get(hyoketsuIndexURL)
+	resp, err := indexHTTPClient.Get(hyoketsuIndexURL)
 	if err != nil {
 		return "", err
 	}
@@ -46,7 +64,7 @@ func downloadDatabase(dbPath string) error {
 		return fmt.Errorf("create directory: %w", err)
 	}
 
-	resp, err := http.Get(hyoketsuDBURL)
+	resp, err := downloadHTTPClient.Get(hyoketsuDBURL)
 	if err != nil {
 		return fmt.Errorf("download database: %w", err)
 	}
@@ -74,5 +92,37 @@ func downloadDatabase(dbPath string) error {
 		return fmt.Errorf("move database into place: %w", err)
 	}
 
+	return nil
+}
+
+// validateSQLiteDB sanity-checks a downloaded database before it is allowed to
+// replace live data. A CDN error page served with HTTP 200, or a truncated
+// transfer, would otherwise be imported over the top of a wiped ClickHouse.
+// The sqlite driver is registered process-wide by import.go's blank import.
+func validateSQLiteDB(path string) error {
+	sdb, err := sql.Open("sqlite", path)
+	if err != nil {
+		return fmt.Errorf("open downloaded database: %w", err)
+	}
+	defer sdb.Close()
+
+	totalRows := 0
+	for _, table := range []string{"known_dlls", "known_jars"} {
+		// Tolerate a missing table the same way importFromSQLite does.
+		var name string
+		if err := sdb.QueryRow(`SELECT name FROM sqlite_master WHERE type='table' AND name=?`, table).Scan(&name); err != nil {
+			continue
+		}
+
+		var count int
+		if err := sdb.QueryRow(fmt.Sprintf(`SELECT COUNT(*) FROM %s`, table)).Scan(&count); err != nil {
+			return fmt.Errorf("count rows in %s: %w", table, err)
+		}
+		totalRows += count
+	}
+
+	if totalRows == 0 {
+		return fmt.Errorf("downloaded database has no rows in known_dlls/known_jars — may be corrupt or incomplete")
+	}
 	return nil
 }
