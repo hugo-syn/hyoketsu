@@ -85,8 +85,6 @@ All steps support resuming — re-running skips already completed work.
 
 `--unknown-only` and `--known-only` are mutually exclusive.
 
-Remote lookups (`scan --remote` and `extract --remote`) classify files as .NET vs. native by binary inspection, but unlike local scans do not mark Microsoft-signed runtime assemblies as pre-known.
-
 ## Server
 
 The `server/` directory contains a ClickHouse-backed HTTP server for centralized scanning, exposing `POST /lookup` and `GET /stats`.

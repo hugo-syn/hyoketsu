@@ -128,15 +128,11 @@ func remoteScan(target string) ([]scanner.Result, error) {
 		}
 	}
 
-	req := make([]remoteLookupFile, len(files))
 	results := make([]scanner.Result, len(files))
+	var req []remoteLookupFile
+	var reqIdx []int // req[j] corresponds to results[reqIdx[j]]
 	for i := range files {
 		scanner.HashFile(&files[i])
-		req[i] = remoteLookupFile{
-			Filename: strings.ToLower(files[i].Filename),
-			Hash:     files[i].Hash,
-			Type:     files[i].Type,
-		}
 		results[i] = scanner.Result{
 			Filename: files[i].Filename,
 			Path:     files[i].Path,
@@ -145,15 +141,39 @@ func remoteScan(target string) ([]scanner.Result, error) {
 			Hash:     files[i].Hash,
 			Status:   "Unknown",
 		}
+
+		// Mirror scanner.Scan's Microsoft-signed runtime detection so
+		// --remote classifies these the same way local scans do, without
+		// depending on a hash match in the remote database.
+		if files[i].Type == "dll" && files[i].IsDotNet {
+			token, _ := pe.PublicKeyToken(files[i].Path)
+			if token != "" && pe.IsMicrosoftToken(token) {
+				results[i].Status = "Known"
+				results[i].MatchedBy = "runtime"
+				results[i].Source = "microsoft"
+				continue
+			}
+		}
+
+		req = append(req, remoteLookupFile{
+			Filename: strings.ToLower(files[i].Filename),
+			Hash:     files[i].Hash,
+			Type:     files[i].Type,
+		})
+		reqIdx = append(reqIdx, i)
 	}
 
-	resp, err := remoteLookup(req)
-	if err != nil {
-		return nil, err
-	}
-	for i := range results {
-		if i < len(resp.Results) {
-			sr := resp.Results[i]
+	if len(req) > 0 {
+		resp, err := remoteLookup(req)
+		if err != nil {
+			return nil, err
+		}
+		for j := range resp.Results {
+			if j >= len(reqIdx) {
+				break
+			}
+			sr := resp.Results[j]
+			i := reqIdx[j]
 			results[i].Status = sr.Status
 			results[i].MatchedBy = sr.MatchedBy
 			results[i].Source = sr.Source
