@@ -110,10 +110,10 @@ func remoteLookup(files []remoteLookupFile) (*remoteLookupResponse, error) {
 	return &lookupResp, nil
 }
 
-func scanRemote(target string) error {
+func remoteScan(target string) ([]scanner.Result, error) {
 	files, err := scanner.CollectFiles(target)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	req := make([]remoteLookupFile, len(files))
@@ -137,7 +137,7 @@ func scanRemote(target string) error {
 
 	resp, err := remoteLookup(req)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	for i := range results {
 		if i < len(resp.Results) {
@@ -160,6 +160,14 @@ func scanRemote(target string) error {
 		}
 	}
 
+	return results, nil
+}
+
+func scanRemote(target string) error {
+	results, err := remoteScan(target)
+	if err != nil {
+		return err
+	}
 	return displayResults(results)
 }
 
