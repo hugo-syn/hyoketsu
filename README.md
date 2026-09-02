@@ -87,11 +87,23 @@ All steps support resuming — re-running skips already completed work.
 
 ## Server
 
-The `server/` directory contains a ClickHouse-backed HTTP server for centralized scanning. See `docker-compose.yml` to get started.
+The `server/` directory contains a ClickHouse-backed HTTP server for centralized scanning, exposing `POST /lookup` and `GET /stats`.
 
 ```
 cd server && go build -o server .
 ```
+
+Run `docker compose up` to bring up ClickHouse and the server together. The server is started with `-auto-update`, so it downloads the latest prebuilt db from the Assetnote CDN and re-imports it into ClickHouse on startup and then every `-auto-update-interval` (default 720h / 30 days) — no manual `-import-sqlite` step is needed.
+
+Flags:
+
+- `-listen` — HTTP listen address (default `:8080`)
+- `-clickhouse` — ClickHouse DSN (default `clickhouse://localhost:9000/default`)
+- `-import-sqlite <path>` — one-shot import from a local SQLite db, then exit
+- `-import-nuget <dir>` — one-shot import of NuGet JSONL data, then exit
+- `-auto-update` — periodically download the latest prebuilt db and re-import it
+- `-auto-update-interval` — interval between re-imports, used with `-auto-update` (default 720h)
+- `-db-cache` — local path to cache the downloaded db before importing, used with `-auto-update` (default `/data/hyoketsu.db`)
 
 ## Extract
 
@@ -105,6 +117,9 @@ Copy unidentified files to a separate directory for decompilation.
 
 # Only .NET, skip dupes
 ./hyoketsu extract --dotnet-only --dedup /path/to/binaries /path/to/output
+
+# Extract against a remote server (ClickHouse backend) instead of a local db
+./hyoketsu extract --remote http://host:8080 /path/to/binaries /path/to/output
 ```
 
 ### Stats
